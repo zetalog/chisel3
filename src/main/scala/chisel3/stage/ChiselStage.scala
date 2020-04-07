@@ -3,7 +3,6 @@
 package chisel3.stage
 
 import firrtl.{ir => fir, AnnotationSeq, EmittedFirrtlCircuitAnnotation, EmittedVerilogCircuitAnnotation}
-import firrtl.annotations.DeletedAnnotation
 import firrtl.options.{Dependency, Phase, PhaseManager, PreservesAll, Shell, Stage, StageError, StageMain}
 import firrtl.options.phases.DeletedWrapper
 import firrtl.stage.{FirrtlCircuitAnnotation, FirrtlCli}
@@ -24,15 +23,14 @@ class ChiselStage extends Stage with PreservesAll[Phase] {
          Dependency[chisel3.stage.phases.AddImplicitOutputFile],
          Dependency[chisel3.stage.phases.AddImplicitOutputAnnotationFile],
          Dependency[chisel3.stage.phases.MaybeAspectPhase],
-         Dependency[chisel3.stage.phases.Emitter],
          Dependency[chisel3.stage.phases.Convert],
          Dependency[chisel3.stage.phases.MaybeFirrtlStage] )
 
+  private val phaseWrappers: Seq[Phase => Phase] = Seq( (a: Phase) => DeletedWrapper(a) )
+
   def run(annotations: AnnotationSeq): AnnotationSeq = try {
-    new PhaseManager(targets) { override val wrappers = Seq( (a: Phase) => DeletedWrapper(a) ) }
-      .transformOrder
-      .map(firrtl.options.phases.DeletedWrapper(_))
-      .foldLeft(annotations)( (a, f) => f.transform(a) )
+    val annotationsx = new PhaseManager(targets) { override val wrappers = phaseWrappers }.transform(annotations)
+    annotationsx
   } catch {
     case ce: ChiselException =>
       val stackTrace = if (!view[ChiselOptions](annotations).printFullStackTrace) {
@@ -60,12 +58,15 @@ class ChiselStage extends Stage with PreservesAll[Phase] {
     args: Array[String] = Array.empty,
     annotations: AnnotationSeq = Seq.empty): String = {
 
-    execute(Array("-X", "none") ++ args, ChiselGeneratorAnnotation(() => gen) +: annotations)
+    val annos = execute(Array("--no-run-firrtl") ++ args, ChiselGeneratorAnnotation(() => gen) +: annotations)
+
+    annos
       .collectFirst {
-        case DeletedAnnotation(_, EmittedFirrtlCircuitAnnotation(a)) => a
+        case a: ChiselCircuitAnnotation => a.howToSerialize.get
       }
       .get
-      .value
+      .map(_.toChar)
+      .mkString
 
   }
 

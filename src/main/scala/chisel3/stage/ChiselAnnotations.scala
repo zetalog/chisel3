@@ -3,20 +3,26 @@
 package chisel3.stage
 
 import firrtl.annotations.{Annotation, NoTargetAnnotation}
-import firrtl.options.{HasShellOptions, OptionsException, ShellOption, Unserializable}
+import firrtl.options.{HasShellOptions, HowToSerialize, OptionsException, ShellOption, StageOptions, Unserializable}
+import firrtl.options.Viewer.view
 import chisel3.{ChiselException, Module}
 import chisel3.RawModule
 import chisel3.internal.Builder
-import chisel3.internal.firrtl.Circuit
+import chisel3.internal.firrtl.{Circuit, Emitter => OldEmitter}
 import firrtl.AnnotationSeq
+import java.io.File
 
 /** Mixin that indicates that this is an [[firrtl.annotations.Annotation]] used to generate a [[ChiselOptions]] view.
   */
-sealed trait ChiselOption extends Unserializable { this: Annotation => }
+sealed trait ChiselOption { this: Annotation => }
 
 /** Disable the execution of the FIRRTL compiler by Chisel
   */
-case object NoRunFirrtlCompilerAnnotation extends NoTargetAnnotation with ChiselOption with HasShellOptions {
+case object NoRunFirrtlCompilerAnnotation
+    extends NoTargetAnnotation
+    with ChiselOption
+    with HasShellOptions
+    with Unserializable {
 
   val options = Seq(
     new ShellOption[Unit](
@@ -29,7 +35,11 @@ case object NoRunFirrtlCompilerAnnotation extends NoTargetAnnotation with Chisel
 
 /** On an exception, this will cause the full stack trace to be printed as opposed to a pruned stack trace.
   */
-case object PrintFullStackTraceAnnotation extends NoTargetAnnotation with ChiselOption with HasShellOptions {
+case object PrintFullStackTraceAnnotation
+    extends NoTargetAnnotation
+    with ChiselOption
+    with HasShellOptions
+    with Unserializable {
 
   val options = Seq(
     new ShellOption[Unit](
@@ -90,9 +100,25 @@ object ChiselGeneratorAnnotation extends HasShellOptions {
 /** Stores a Chisel Circuit
   * @param circuit a Chisel Circuit
   */
-case class ChiselCircuitAnnotation(circuit: Circuit) extends NoTargetAnnotation with ChiselOption
+case class ChiselCircuitAnnotation(circuit: Circuit) extends NoTargetAnnotation with ChiselOption with HowToSerialize {
 
-case class ChiselOutputFileAnnotation(file: String) extends NoTargetAnnotation with ChiselOption
+  protected def baseFileName: String = circuit.name
+
+  protected def suffix: Option[String] = Some(".fir")
+
+  override def howToSerialize: Option[Stream[Byte]] = Some(OldEmitter.emit(circuit).toStream.map(_.toByte))
+
+  override def howToResume(file: File): Option[AnnotationSeq] = None
+
+  override def filename(annotations: AnnotationSeq): File = {
+    val sopts = view[StageOptions](annotations)
+    val copts = view[ChiselOptions](annotations)
+    new File(sopts.getBuildFileName(copts.outputFile.getOrElse(baseFileName), suffix))
+  }
+
+}
+
+case class ChiselOutputFileAnnotation(file: String) extends NoTargetAnnotation with ChiselOption with Unserializable
 
 object ChiselOutputFileAnnotation extends HasShellOptions {
 
